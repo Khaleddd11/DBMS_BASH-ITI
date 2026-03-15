@@ -38,8 +38,7 @@ echo "Contents of '$chosen_tbl':"
 echo "-----------------------------------------------"
 
 awk 'BEGIN {FS="|"; OFS="\t"} {
-    nf = (NR==1) ? NF-1 : NF
-    for (i=1; i<=nf; i++) {
+    for (i=1; i<=NF; i++) {
         printf "%-15s", $i
     }
     print ""

@@ -1,0 +1,80 @@
+#!/bin/bash
+dbName=$1
+
+function deleteFromTable() {
+    DBName=$dbName
+
+    echo "--------------------------------------------------------"
+    read -p "Enter Table Name you want to delete data from: " tableName
+    echo "--------------------------------------------------------"
+    
+    metadataFile="dbs/$DBName/.metadata/$tableName.meta"
+    tableFile="dbs/$DBName/$tableName"
+    
+
+    # Check if the metadata file for the specified table exists
+    if [[ ! -f $metadataFile ]]; then
+        echo "Table $tableName does not exist."
+        return
+    fi
+
+
+    echo "Choose an option:"
+    echo "1. Delete a specific row (by Primary Key)"
+    echo "2. Delete all data (Truncate)"
+    echo "---------------------------------------"
+    read -p "Enter your choice (1 or 2): " choice
+
+    if [[ $choice -eq 1 ]]; then
+        # Read the first column name (which by default is the primary key).
+        pkColumn=""
+        while IFS=":" read -r columnName dataType constraint; do
+            if [[ $constraint == "pk" ]]; then
+                pkColumn=$columnName
+                break
+            fi
+        done < "$metadataFile"
+
+
+        read -p "Enter $pkColumn value of the row to delete: " pkValue
+        echo "----------------------------------"
+        
+
+
+        # Validate the primary key value based on its data type.
+        pkDataType=$(grep "^$pkColumn:" "$metadataFile" | cut -d: -f2)
+        if [[ $pkDataType == "int" && ! $pkValue =~ ^[0-9]+$ ]]; then
+            echo "Invalid input! $pkColumn must be an integer."
+            return
+        elif [[ $pkDataType == "string" && ! $pkValue =~ ^[a-zA-Z]+$ ]]; then
+            echo "Invalid input! $pkColumn must be a string with alphanumeric characters only."
+            return
+        fi
+        
+        # check if the primary key value exists in the table.
+        if ! grep -q "^$pkValue|" "$tableFile"; then
+            echo "No entry found with $pkColumn = $pkValue."
+            return
+        fi
+        
+        # filters out lines that match the pattern 
+        grep -v "^$pkValue|" "$tableFile" > "$tableFile.tmp"
+        # Move the temporary file to replace the original table file
+        mv "$tableFile.tmp" "$tableFile"
+        echo "Row with $pkColumn = $pkValue deleted from table $tableName."
+        echo "------------------------------------"
+
+    elif [[ $choice -eq 2 ]]; then
+        # delete all data from the table using redirection
+        > "$tableFile"
+        echo "all data deleted from table $tableName."
+        echo "------------------------------------"
+
+    else
+        echo "Invalid choice. Please enter 1 or 2"
+    fi
+}
+
+
+deleteFromTable
+./tableMenu "$dbName"

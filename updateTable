@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# Script takes the target database name as its first argument.
+dbName=$1
+
+# Ask for the table that will be modified.
+echo "---------------------------------------------------------------------------------------"
+read -p "Type the name of the table to modify: " tableName
+
+
+# Verify that the selected table file is present.
+if [ ! -f "./dbs/$dbName/$tableName" ]; then
+    echo "---------------------------------------------------------------------------------------"
+    echo "Table $tableName does not exist."
+    exit
+fi
+
+# Set paths for both the metadata descriptor and the table data.
+metaFile="./dbs/$dbName/.metadata/$tableName.meta"
+tableFile="./dbs/$dbName/$tableName"
+
+# Helper to retrieve a column number and its declared type from metadata.
+getColumnNumber() {
+    column=$1
+
+    # Obtain column number
+    colNum=$(awk -v col="$column" 'BEGIN {RS="\n"; FS=":"} {if ($1 == col) print NR}' "$metaFile")
+    # Obtain column type
+    type=$(awk -v col="$column" 'BEGIN {RS="\n"; FS=":"} {if ($1 == col) print $2}' "$metaFile")
+
+    echo "$colNum,$type"
+}
+
+# Ask which column should be updated.
+echo "---------------------------------------------------------------------------------------"
+read -p "Type the column you want to change: " column
+
+
+# Determine both the column index and type from metadata.
+getcol=$(getColumnNumber "$column")
+colNum=$(echo "$getcol" | cut -d ',' -f 1)
+type=$(echo "$getcol" | cut -d ',' -f 2)
+
+# Ensure that the requested column actually exists.
+if [ -z "$colNum" ]; then
+    echo "---------------------------------------------------------------------------------------"
+    echo "Column $column does not exist."
+else
+    # Ask for the replacement value for the chosen column.
+    echo "---------------------------------------------------------------------------------------"
+    read -p "Provide the new value for $column ($type): " new
+
+    # Build a validation pattern based on the column type.
+    typecheck=""
+    if [[ "$type" == "string" ]]; then
+        typecheck='^[A-Za-Z]+$'
+    else
+        typecheck='^[0-9]+$'
+    fi
+
+    # Confirm that the new value matches the expected type.
+    if [[ ! "$new" =~ $typecheck ]]; then
+        echo "---------------------------------------------------------------------------------------"
+        echo "Value must match the declared type: $type."
+    else
+        # Ask which column should be used as the condition.
+        echo "---------------------------------------------------------------------------------------"
+        read -p "Type the name of the condition column: " ccolumn
+
+        getccol=$(getColumnNumber "$ccolumn")
+        ccolNum=$(echo "$getccol" | cut -d ',' -f 1)
+        ctype=$(echo "$getccol" | cut -d ',' -f 2)
+
+        # Build a validation pattern for the condition column type.
+        ctypecheck=""
+        if [[ "$ctype" == "string" ]]; then
+            ctypecheck='^[A-Za-Z]+$'
+        else
+            ctypecheck='^[0-9]+$'
+        fi
+
+        # Ensure that the condition column exists.
+        if [ -z "$ccolNum" ]; then
+            echo "---------------------------------------------------------------------------------------"
+            echo "Condition column $ccolumn does not exist."
+        else
+            # Ask for the value that will be used in the condition.
+            echo "---------------------------------------------------------------------------------------"
+            read -p "Provide the value for $ccolumn ($ctype): " cvalue
+
+            # Validate the condition value according to its type.
+            if [[ ! "$cvalue" =~ $ctypecheck ]]; then
+                echo "---------------------------------------------------------------------------------------"
+                echo "Condition value must match the type: $ctype."
+            else
+                # Build the condition payload that will be consumed by awk.
+                condition=($ccolNum "$cvalue" $colNum "$new")
+                IFS=','; conditionStr="${condition[*]}"; unset IFS
+
+                # Apply the update to the table file using awk.
+                awk -v condition="$conditionStr" '
+                BEGIN {
+                    FS = "|";
+                    OFS = "|";
+                    split(condition, arr, ",");
+                    count=0
+                }
+                {
+                    ccol = arr[1];
+                    cval = arr[2];
+                    col = arr[3];
+                    new = arr[4];
+
+                    if ($ccol == cval) {
+                        $col = new;
+                        count++;
+                    }
+                    print $0;
+                }
+                END{print count;}' "$tableFile" > ./output
+
+                # Replace the original table file with the modified version.
+                count=$(cat ./output | tail -1)
+                echo "$(sed '$d' "./output")" > ./output
+                mv ./output "$tableFile"
+                echo "---------------------------------------------------------------------------------------"
+                echo "$count rows where $ccolumn = $cvalue were updated in table $tableName."
+            fi
+        fi
+    fi
+fi
